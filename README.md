@@ -1,145 +1,221 @@
-# Mini ERP + CRM Operations Portal
+# Operations ERP Portal
 
-A role-based operations system for a distribution business — customer relationship management, inventory tracking, and sales challan processing, with dedicated workspaces for Admin, Sales, Warehouse, and Accounts users.
-
-🔗 **Repository:** [https://github.com/mithunmourya/erpportal](https://github.com/mithunmourya/erpportal)  
-🌐 **Live frontend:** [https://erpportal-p9hf.vercel.app](https://erpportal-p9hf.vercel.app)  
-⚙️ **Live backend API:** [https://erpportal-tswc.onrender.com](https://erpportal-tswc.onrender.com)  
+A distribution operations platform built for businesses that need one system to run customer relationships, inventory, and sales — instead of juggling a CRM, a spreadsheet for stock, and a separate billing tool. Built with a role-based workspace for Admin, Sales, Warehouse, and Accounts users, so each person sees only what their job actually needs.
 
 ---
 
-## Test credentials
+## Tech Stack
 
-All roles use the same password for testing.
+**Frontend**
+- React
+- Vite
+- Plain CSS (custom design system — no component library)
+- Axios
+- React Router
 
-| Role | Email | Password |
-|---|---|---|
-| Admin | admin@erp.com | admin123 |
-| Sales | rahul@erp.com | password123 |
-| Warehouse | ramesh@erp.com | password123 |
-| Accounts | priya@erp.com | password123 |
-
-*(Note: Ensure you run the initial database setup if testing locally to create the System Admin account).*
-
----
-
-## Tech stack
-
-- **Backend:** Node.js, Express 5, MySQL (mysql2/promise), JWT authentication
-- **Frontend:** React, Vite, Tailwind CSS v4, Recharts
-- **Deployment:** 
-  - **Database:** Aiven (Cloud MySQL)
-  - **Backend:** Render (via Blueprint `render.yaml`)
-  - **Frontend:** Vercel (via GitHub integration)
+**Backend**
+- Node.js
+- Express 5
+- MySQL (`mysql2/promise` — raw SQL, no ORM)
+- JWT Authentication
+- bcrypt
 
 ---
 
 ## Architecture
 
-The backend follows a strict layered architecture, with every request passing through the same fixed path:
+Every request follows the same fixed path, enforced across the whole backend:
 
-```text
+```
 Route → Controller → Service → Model → Database
 ```
 
-| Layer | Responsibility |
-|---|---|
-| **Routes** | Maps HTTP verb + path + middleware to a controller function. No logic. |
-| **Controllers** | Reads the request, calls the matching service, shapes the HTTP response. No SQL, no business rules. |
-| **Services** | All business logic lives here — validation, stock rules, atomic transactions. Never touches `req`/`res`. |
-| **Models** | Raw SQL via `mysql2`, one file per entity. No business logic — just query functions. |
+- **Routes** map HTTP verb + path to a controller. No logic.
+- **Controllers** read the request and call a service. No SQL, no business rules.
+- **Services** hold all business logic — validation, stock rules, atomic transactions. Never touch `req`/`res`.
+- **Models** are raw SQL query functions, one file per entity. No business logic.
 
-This separation means, for example, that confirming a sales challan — checking stock, deducting it, logging the movement, and updating challan status — is coordinated entirely in `salesChallanService.js` as one atomic transaction, while the controller only knows it called `confirmChallan()` and got a result back.
+This is what keeps something like challan confirmation — checking stock, deducting it, logging the movement, updating status — as a single atomic transaction in the service layer, instead of scattered across controller code.
 
-**API response shape** is consistent across all endpoints:
-```json
-// Success
-{ "success": true, "data": { ... } }
+---
 
-// Error
-{ "success": false, "message": "..." }
+## Features
+
+**Authentication**
+- JWT-based login
+- Role-based protected routes (Admin / Sales / Warehouse / Accounts)
+
+**Dashboard**
+- Active customer count
+- Draft challan count
+- Low stock alerts
+- Role-specific views — Sales sees deals and quotes, Warehouse sees stock and dispatch, Accounts sees revenue and reconciliation
+
+**Customer Management (CRM)**
+- View, search, add, edit customers
+- Follow-up note history per customer
+- No hard deletes — customers are deactivated (`is_active = false`), not removed
+
+**Product Management**
+- View, search, add, edit products
+- Low-stock threshold flagging
+- Same soft-deactivation pattern as customers
+
+**Inventory Management**
+- Log stock movements (IN / OUT) with a reason
+- Full movement history per product
+- Stock cannot be reduced below zero — enforced server-side, not just in the UI
+
+**Sales Challan Management**
+- Create a challan with multiple products in a single request
+- Line items store a **snapshot** of product name and price at the time of sale, so later price changes don't rewrite sales history
+- Draft → Confirmed → Cancelled lifecycle
+- Confirming a challan is one atomic transaction: stock check, stock deduction, inventory movement log, and status update all succeed or all roll back together
+
+---
+
+## Project Structure
+
+```
+operations-erp-portal/
+│
+├── backend/
+│   ├── src/
+│   │   ├── models/       → raw SQL queries, one file per entity
+│   │   ├── services/     → business logic, validation, transactions
+│   │   ├── controllers/  → request in, service call, response out
+│   │   ├── routes/       → route definitions only
+│   │   ├── middleware/   → verifyToken, requireRole, error handler
+│   │   ├── config/       → db.js, init_db.js
+│   │   └── utils/        → challan number generator, response formatter
+│   ├── package.json
+│   └── .env
+│
+├── frontend/
+│   ├── src/
+│   ├── public/
+│   ├── package.json
+│   └── .env
+│
+└── README.md
 ```
 
-**Soft deletes:** `users`, `customers`, and `products` are never hard-deleted. Each has a `PUT /:id/deactivate` endpoint (Admin-only) that sets `is_active = false`; all list endpoints filter to active records by default.
-
 ---
 
-## Database schema
+## Installation
 
-7 tables:
-
-- **`users`** — auth + role (`Admin` / `Sales` / `Warehouse` / `Accounts`)
-- **`customers`** — CRM records, linked to `customer_follow_ups`
-- **`customer_follow_ups`** — follow-up note history per customer
-- **`products`** — catalog + live stock count
-- **`stock_movements`** — immutable IN/OUT log per product
-- **`sales_challans`** — sales orders (`Draft` / `Confirmed` / `Cancelled`)
-- **`challan_items`** — line items, storing a **snapshot** of product name and price at time of sale (so later price changes don't rewrite history)
-
-Full column definitions are in [`backend/src/config/init_db.js`](./backend/src/config/init_db.js).
-
----
-
-## Roles & permissions
-
-| Role | Can do |
-|---|---|
-| **Admin** | Full access — all modules, user management, deactivate customers/products/users |
-| **Sales** | Manage customers, create and edit draft challans, view products |
-| **Warehouse** | Log stock movements, view/confirm challans (stock deduction), view products |
-| **Accounts** | View sales challans, revenue and reporting views (Monthly/Daily dashboards) |
-
----
-
-## Setup
-
-### Local development
+**Clone the repository**
 
 ```bash
-# clone
-git clone https://github.com/mithunmourya/erpportal.git
-cd erpportal
+git clone https://github.com/[your-username]/operations-erp-portal.git
+cd operations-erp-portal
+```
 
-# backend
+**Backend setup**
+
+```bash
 cd backend
 npm install
-cp .env.example .env   # fill in DB credentials + JWT secret
-node src/config/init_db.js   # creates all 7 tables
+cp .env.example .env      # add DB credentials + JWT secret
+node src/config/init_db.js   # creates all tables
 npm run dev
+```
 
-# frontend
-cd ../frontend
+Backend runs on:
+```
+http://localhost:5000
+```
+
+**Frontend setup**
+
+```bash
+cd frontend
 npm install
 npm run dev
 ```
 
-**Required `.env` variables (backend):**
-```env
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=
-DB_NAME=erp_portal
-JWT_SECRET=my_super_secret_dev_key
-PORT=5000
+Frontend runs on:
+```
+http://localhost:5173
 ```
 
-### Deployment
+---
 
-- **Database:** Deployed on Aiven Free MySQL tier. Connection strictly requires SSL.
-- **Backend:** Deployed to Render using the `render.yaml` Blueprint. Required environment variables (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL=true`, `JWT_SECRET`) are configured in the Render Dashboard.
-- **Frontend:** Deployed to Vercel via GitHub integration. The API base URL is set via `VITE_API_URL` environment variable at build time (pointing to the Render deployment).
+## Database
+
+- **Database:** MySQL
+- **Access layer:** raw SQL via `mysql2/promise` — no ORM, queries are explicit and reviewable in the models layer
+
+**Main entities**
+
+| Table | Purpose |
+|---|---|
+| `users` | Auth + role (Admin / Sales / Warehouse / Accounts) |
+| `customers` | CRM records |
+| `customer_follow_ups` | Follow-up note history, linked to customers |
+| `products` | Catalog and live stock count |
+| `stock_movements` | Immutable IN/OUT log per product |
+| `sales_challans` | Sales orders — Draft / Confirmed / Cancelled |
+| `challan_items` | Line items with product/price snapshots |
 
 ---
 
-## Known limitations / incomplete parts
+## Business Workflow
 
-- Frontend UI has not been extensively tested on very small mobile viewports for the complex Sales Challan creation screens.
-- No external email/SMS notifications for low-stock alerts or follow-up reminders — these are surfaced only in-app natively.
-- No pagination limit configuration exposed to the frontend (backend supports it natively, UI currently relies on scrolling/filtering).
-- No automated test suite (Jest/Cypress) fully implemented yet — testing has been manual via Postman and browser.
+```
+Customer
+   │
+   ▼
+Create Draft Challan (multiple products, quantities)
+   │
+   ▼
+Confirm Challan
+   │
+   ├──► Validate stock is sufficient for every item
+   ├──► Deduct stock per item
+   ├──► Log a stock movement (OUT) per item
+   └──► Set challan status to Confirmed
+   │
+   ▼
+Dashboard reflects updated stock, revenue, and challan counts
+```
+
+If stock is insufficient for any item, the entire confirmation is rolled back — no partial deductions.
 
 ---
 
-## License
+## API Modules
 
-MIT License
+- Auth — register, login
+- Customers — CRUD, follow-ups
+- Products — CRUD, stock alerts
+- Inventory — stock movement logging and history
+- Challans — create, edit (while Draft), confirm, cancel
+
+---
+
+## Roles & Permissions
+
+| Role | Access |
+|---|---|
+| Admin | Full access — all modules, user management, deactivation rights |
+| Sales | Customers, draft/edit challans, read-only product catalog |
+| Warehouse | Stock movements, challan confirmation, read-only product catalog |
+| Accounts | Sales challans (read), revenue and reporting views |
+
+---
+
+## Future Improvements
+
+- Revenue dashboard with daily/monthly charts
+- PDF challan export
+- Advanced search and filtering across modules
+- Automated test coverage
+- Responsive mobile layouts for Warehouse and POS-style screens
+- **AI assistant for operational queries** — a chatbot (built with LangChain) that lets users ask natural-language questions about their own data — "which customers haven't ordered in 60 days," "what's low on stock right now" — using retrieval-augmented generation (RAG) over the customers, products, and challan tables, so answers are grounded in actual database records rather than the model's general knowledge
+
+---
+
+## Author
+
+Ramya
