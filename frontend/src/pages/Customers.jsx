@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as crmService from '../services/crmService';
 import Modal from '../components/ui/Modal';
-import Modal from '../components/ui/Modal';
 import { Edit2, Ban, Eye, Calendar, User, MessageCircle } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
